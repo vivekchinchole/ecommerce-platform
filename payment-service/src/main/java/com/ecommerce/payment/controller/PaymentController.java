@@ -16,8 +16,8 @@ public class PaymentController {
     @PostMapping
     public PaymentResponse create(
             @RequestHeader("Idempotency-Key") String key,
-            @RequestBody PaymentRequest request){
+            @RequestBody PaymentRequest request) throws InterruptedException {
 
-        return paymentService.createPayment(key,request);
+        return paymentService.createPayment(key, request);
     }
 }

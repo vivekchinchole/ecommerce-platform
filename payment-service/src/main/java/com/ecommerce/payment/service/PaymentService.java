@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -22,23 +23,34 @@ public class PaymentService {
     private final IdempotencyService idempotencyService;
     private final RedissonClient redissonClient;
     private final PaymentEventPublisher publisher;
+    private final MockPaymentGateway mockGateway; // simulate gateway
 
-    public PaymentResponse createPayment(String key, PaymentRequest request) {
+    public PaymentResponse createPayment(String key, PaymentRequest request) throws InterruptedException {
 
+        // 1️⃣ Check Redis idempotency cache
         PaymentResponse cached = idempotencyService.get(key);
+        if (cached != null) {
+            return cached;
+        }
 
-        if (cached != null) return cached;
+        // 2️⃣ Distributed lock
+        RLock lock = redissonClient.getLock("payment-lock:" + key);
 
-        RLock lock = redissonClient.getLock("payment-lock:"+key);
+        boolean acquired = lock.tryLock(10, 30, TimeUnit.SECONDS);
+
+        if (!acquired) {
+            throw new RuntimeException("Could not acquire payment lock");
+        }
 
         try {
-            lock.lock();
 
-            Optional<Payment> existing =
-                    repository.findByIdempotencyKey(key);
+            // 3️⃣ Check DB for existing idempotency key
+            Optional<Payment> existing = repository.findByIdempotencyKey(key);
 
-            if(existing.isPresent()){
+            if (existing.isPresent()) {
+
                 Payment p = existing.get();
+
                 return new PaymentResponse(
                         p.getId(),
                         p.getStatus(),
@@ -47,6 +59,7 @@ public class PaymentService {
                 );
             }
 
+            // 4️⃣ Create payment record
             Payment payment = new Payment();
 
             payment.setIdempotencyKey(key);
@@ -54,25 +67,52 @@ public class PaymentService {
             payment.setUserId(request.getUserId());
             payment.setAmount(request.getAmount());
             payment.setCurrency(request.getCurrency());
-            payment.setStatus(PaymentStatus.SUCCESS);
+            payment.setStatus(PaymentStatus.INITIATED);
             payment.setCreatedAt(LocalDateTime.now());
 
             repository.save(payment);
 
-            PaymentResponse response =
-                    new PaymentResponse(payment.getId(),
-                            payment.getStatus(),
-                            payment.getAmount(),
-                            payment.getCreatedAt());
+            // 5️⃣ Mark as PROCESSING
+            payment.setStatus(PaymentStatus.PROCESSING);
+            repository.save(payment);
 
-            idempotencyService.save(key,response);
+            // 6️⃣ Call payment gateway (simulation)
+            boolean success = mockGateway.charge(payment);
 
-            publisher.publish(payment);
+            if (success) {
+
+                payment.setStatus(PaymentStatus.SUCCESS);
+                repository.save(payment);
+
+                publisher.publishSuccess(payment);
+
+            } else {
+
+                payment.setStatus(PaymentStatus.FAILED);
+                repository.save(payment);
+
+                publisher.publishFailed(payment);
+            }
+
+            // 7️⃣ Prepare response
+            PaymentResponse response = new PaymentResponse(
+                    payment.getId(),
+                    payment.getStatus(),
+                    payment.getAmount(),
+                    payment.getCreatedAt()
+            );
+
+            // 8️⃣ Save idempotency response in Redis
+            idempotencyService.save(key, response);
 
             return response;
 
         } finally {
-            lock.unlock();
+
+            // 9️⃣ Safe unlock
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
         }
     }
 }

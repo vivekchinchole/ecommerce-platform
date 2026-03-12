@@ -9,9 +9,15 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class PaymentEventPublisher {
 
-    private final KafkaTemplate<String,Object> kafkaTemplate;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
 
-    public void publish(Payment payment) {
+    public void publishSuccess(Payment payment) {
+
         kafkaTemplate.send("payment.completed", payment);
+    }
+
+    public void publishFailed(Payment payment) {
+
+        kafkaTemplate.send("payment.failed", payment);
     }
 }
