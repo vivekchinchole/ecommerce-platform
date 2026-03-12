@@ -44,6 +44,19 @@ services:
     networks:
       - ecommerce-net
 
+  postgres-payment:
+    image: postgres:15
+    container_name: postgres-payment
+    environment:
+      POSTGRES_DB: paymentdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres-payment-data:/var/lib/postgresql/data
+    networks:
+      - ecommerce-net
 
   mongodb:
     image: mongo:6
@@ -95,6 +108,7 @@ volumes:
   postgres-user-data:
   postgres-product-data:
   postgres-order-data:
+  postgres-payment-data:
   mongodb-data:
 
 networks:
