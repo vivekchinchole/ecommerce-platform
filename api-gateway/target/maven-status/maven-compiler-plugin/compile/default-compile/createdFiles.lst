@@ -1,4 +1,0 @@
-com\ecommerce\gateway\ApiGatewayApplication.class
-com\ecommerce\gateway\filter\JwtAuthFilter.class
-com\ecommerce\gateway\config\JwtUtil.class
-com\ecommerce\gateway\filter\RateLimitFilter.class
